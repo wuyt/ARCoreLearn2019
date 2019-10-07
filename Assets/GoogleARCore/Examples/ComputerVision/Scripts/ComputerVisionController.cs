@@ -24,7 +24,6 @@ namespace GoogleARCore.Examples.ComputerVision
     using System.Collections.Generic;
     using GoogleARCore;
     using UnityEngine;
-    using UnityEngine.SceneManagement;
     using UnityEngine.UI;
 
     #if UNITY_EDITOR
@@ -143,8 +142,7 @@ namespace GoogleARCore.Examples.ComputerVision
         {
             if (Input.GetKey(KeyCode.Escape))
             {
-                //Application.Quit();
-                SceneManager.LoadScene("Menu");
+                Application.Quit();
             }
 
             _QuitOnConnectionErrors();

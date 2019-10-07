@@ -23,7 +23,6 @@ namespace GoogleARCore.Examples.ObjectManipulation
     using System.Collections.Generic;
     using GoogleARCore;
     using UnityEngine;
-    using UnityEngine.SceneManagement;
 
 #if UNITY_EDITOR
     // Set up touch input propagation while using Instant Preview in the editor.
@@ -57,8 +56,7 @@ namespace GoogleARCore.Examples.ObjectManipulation
             // Exit the app when the 'back' button is pressed.
             if (Input.GetKey(KeyCode.Escape))
             {
-                //Application.Quit();
-                SceneManager.LoadScene("Menu");
+                Application.Quit();
             }
 
             // Only allow the screen to sleep when not tracking.

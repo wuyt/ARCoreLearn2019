@@ -65,6 +65,8 @@ namespace GoogleARCoreInternal
 
         private List<CameraConfig> m_TempCameraConfigs = new List<CameraConfig>();
 
+        public event Action UpdateSessionFeatures;
+
         public event Action EarlyUpdate;
 
         public event Action<bool> OnSessionSetEnabled;
@@ -80,6 +82,8 @@ namespace GoogleARCoreInternal
                     ARPrestoCallbackManager.Instance.EarlyUpdate += s_Instance._OnEarlyUpdate;
                     ARPrestoCallbackManager.Instance.BeforeResumeSession +=
                         s_Instance._OnBeforeResumeSession;
+
+                    ExperimentManager.Instance.Initialize();
                 }
 
                 return s_Instance;
@@ -210,6 +214,16 @@ namespace GoogleARCoreInternal
             if (m_HaveDisableToEnableTransition)
             {
                 _SetSessionEnabled(false);
+
+                // Refresh SessionStatus after first _SetSessionEnabled() to catch any changes to
+                // the SessionStatus that may affect the subsequent _SetSessionEnabled().
+                // This fixes an issue where the session does not get re-enabled properly when an
+                // unsupported configuration is fixed, and the ARCoreSession component's enabled
+                // state is toggled in the same frame;
+                ApiPrestoStatus refreshPrestoStatus = ApiPrestoStatus.Uninitialized;
+                ExternApi.ArPresto_getStatus(ref refreshPrestoStatus);
+                SessionStatus = refreshPrestoStatus.ToSessionStatus();
+
                 _SetSessionEnabled(true);
                 m_HaveDisableToEnableTransition = false;
 
@@ -227,15 +241,38 @@ namespace GoogleARCoreInternal
             }
 
             // Perform updates before calling ArPresto_update.
-            _UpdateDisplayGeometry();
             if (SessionComponent != null)
             {
+                IntPtr previousSession = IntPtr.Zero;
+                ExternApi.ArPresto_getSession(ref previousSession);
+
+                if (UpdateSessionFeatures != null)
+                {
+                    UpdateSessionFeatures();
+                }
+
                 _SetCameraDirection(SessionComponent.DeviceCameraDirection);
+
+                IntPtr currentSession = IntPtr.Zero;
+                ExternApi.ArPresto_getSession(ref currentSession);
+
+                // Fire the session enabled event when the underlying session has been changed
+                // due to session feature update(camera direction etc).
+                if (previousSession != currentSession)
+                {
+                    _FireOnSessionSetEnabled(false);
+                    _FireOnSessionSetEnabled(true);
+                }
+
                 _SetConfiguration(SessionComponent.SessionConfig);
             }
 
+            _UpdateDisplayGeometry();
+
             // Update ArPresto and potentially ArCore.
             ExternApi.ArPresto_update();
+
+            SessionStatus previousSessionStatus = SessionStatus;
 
             // Get state information from ARPresto.
             ApiPrestoStatus prestoStatus = ApiPrestoStatus.Uninitialized;
@@ -248,6 +285,14 @@ namespace GoogleARCoreInternal
                 var cameraHandle = NativeSession.FrameApi.AcquireCamera();
                 LostTrackingReason = NativeSession.CameraApi.GetLostTrackingReason(cameraHandle);
                 NativeSession.CameraApi.Release(cameraHandle);
+            }
+
+            // If the current status is an error, check if the SessionStatus error state changed.
+            if (SessionStatus.IsError() &&
+                previousSessionStatus.IsError() != SessionStatus.IsError())
+            {
+                // Disable internal session bits so we properly pause the session due to error.
+                _FireOnSessionSetEnabled(false);
             }
 
             // Get the current session from presto and note if it has changed.
@@ -344,23 +389,30 @@ namespace GoogleARCoreInternal
                 return;
             }
 
-            _FireOnSessionSetEnabled(sessionEnabled);
+            // If the session status is an error, do not fire the callback itself; but do
+            // ArPresto_setEnabled to signal the intention to resume once the session status is
+            // valid.
+            if (!SessionStatus.IsError())
+            {
+                _FireOnSessionSetEnabled(sessionEnabled);
+            }
+
             ExternApi.ArPresto_setEnabled(sessionEnabled);
         }
 
-        private void _SetCameraDirection(DeviceCameraDirection cameraDirection)
+        private bool _SetCameraDirection(DeviceCameraDirection cameraDirection)
         {
             // The camera direction has not changed.
             if (m_CachedCameraDirection.HasValue &&
                 m_CachedCameraDirection.Value == cameraDirection)
             {
-                return;
+                return false;
             }
 
             if (InstantPreviewManager.IsProvidingPlatform &&
                 cameraDirection == DeviceCameraDirection.BackFacing)
             {
-                return;
+                return false;
             }
             else if (InstantPreviewManager.IsProvidingPlatform)
             {
@@ -372,7 +424,7 @@ namespace GoogleARCoreInternal
                     SessionComponent.DeviceCameraDirection = DeviceCameraDirection.BackFacing;
                 }
 
-                return;
+                return false;
             }
 
             m_CachedCameraDirection = cameraDirection;
@@ -381,9 +433,9 @@ namespace GoogleARCoreInternal
                     ApiPrestoDeviceCameraDirection.BackFacing :
                     ApiPrestoDeviceCameraDirection.FrontFacing;
 
-            _FireOnSessionSetEnabled(false);
             ExternApi.ArPresto_setDeviceCameraDirection(apiCameraDirection);
-            _FireOnSessionSetEnabled(true);
+
+            return true;
         }
 
         private void _SetConfiguration(ARCoreSessionConfig config)
@@ -405,22 +457,10 @@ namespace GoogleARCoreInternal
 
             if (InstantPreviewManager.IsProvidingPlatform)
             {
-                if (config.PlaneFindingMode == DetectedPlaneFindingMode.Disabled)
+                if (config.LightEstimationMode != LightEstimationMode.Disabled)
                 {
-                    InstantPreviewManager.LogLimitedSupportMessage("disable 'Plane Finding'");
-                    config.PlaneFindingMode = DetectedPlaneFindingMode.Horizontal;
-                }
-
-                if (!config.EnableLightEstimation)
-                {
-                    InstantPreviewManager.LogLimitedSupportMessage("disable 'Light Estimation'");
-                    config.EnableLightEstimation = true;
-                }
-
-                if (config.CameraFocusMode == CameraFocusMode.Auto)
-                {
-                    InstantPreviewManager.LogLimitedSupportMessage("enable camera Auto Focus mode");
-                    config.CameraFocusMode = CameraFocusMode.Fixed;
+                    InstantPreviewManager.LogLimitedSupportMessage("enable 'Light Estimation'");
+                    config.LightEstimationMode = LightEstimationMode.Disabled;
                 }
 
                 if (config.AugmentedImageDatabase != null)

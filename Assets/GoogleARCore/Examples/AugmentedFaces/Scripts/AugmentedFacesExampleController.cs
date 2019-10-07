@@ -24,7 +24,6 @@ namespace GoogleARCore.Examples.AugmentedFaces
     using GoogleARCore;
     using UnityEngine;
     using UnityEngine.UI;
-    using UnityEngine.SceneManagement;
 
     /// <summary>
     /// Controller for the AugmentedFaces sample scene.
@@ -76,8 +75,7 @@ namespace GoogleARCore.Examples.AugmentedFaces
             // Exit the app when the 'back' button is pressed.
             if (Input.GetKey(KeyCode.Escape))
             {
-                //Application.Quit();
-                SceneManager.LoadScene("Menu");
+                Application.Quit();
             }
 
             if (m_IsQuitting)
@@ -107,7 +105,7 @@ namespace GoogleARCore.Examples.AugmentedFaces
         /// </summary>
         private void _DoQuit()
         {
-            Application.Quit(); 
+            Application.Quit();
         }
 
         /// <summary>
